@@ -1,21 +1,32 @@
 import { useState } from 'react'
 import { ShoppingBag } from 'lucide-react'
+import api from '../utils/api'
 
 export default function Login({ onLogin }) {
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (username === 'admin' && password === 'admin') {
-      setError('')
-      const mockToken = 'mock-jwt-token-' + Date.now()
-      localStorage.setItem('accessToken', mockToken)
-      localStorage.setItem('user', JSON.stringify({ username }))
+    setError('')
+    setLoading(true)
+
+    try {
+      const response = await api.post('/auth/login', {
+        email,
+        password,
+      })
+
+      const { accessToken, user } = response.data
+      localStorage.setItem('accessToken', accessToken)
+      localStorage.setItem('user', JSON.stringify(user))
       onLogin()
-    } else {
-      setError('Invalid credentials. Use admin/admin')
+    } catch (err) {
+      setError(err.response?.data?.message || err.response?.data?.error || 'Invalid credentials. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -31,14 +42,15 @@ export default function Login({ onLogin }) {
         </div>
         <form onSubmit={handleSubmit} className="login-form">
           <div className="form-group">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="email">Email</label>
             <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
-              autoComplete="username"
+              type="email"
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter email"
+              autoComplete="email"
+              required
             />
           </div>
           <div className="form-group">
@@ -53,10 +65,12 @@ export default function Login({ onLogin }) {
             />
           </div>
           {error && <div className="error-message">{error}</div>}
-          <button type="submit" className="btn-primary">Sign In</button>
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
         </form>
         <div className="login-footer">
-          <p>🛍️ Demo credentials: admin / admin</p>
+          <p>📧 Use your registered email and password</p>
         </div>
       </div>
     </div>

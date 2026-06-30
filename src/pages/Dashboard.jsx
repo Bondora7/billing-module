@@ -14,7 +14,7 @@ const MOCK_PRODUCTS = [
 
 const CATEGORIES = ['All', 'Clothing', 'Accessories', 'Shoes', 'Watches']
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ user, onLogout }) {
   const [purchases, setPurchases] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedProduct, setSelectedProduct] = useState(null)
@@ -138,9 +138,13 @@ export default function Dashboard({ onLogout }) {
               </div>
               <div className="pos-user-info">
                 <div className="pos-cashier">
-                  <div className="pos-avatar">AD</div>
+                  <div className="pos-avatar">
+                    {user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}
+                  </div>
                   <div>
-                    <div className="pos-username">Admin Cashier</div>
+                    <div className="pos-username">
+                      {user ? `${user.firstName} ${user.lastName}` : 'Admin Cashier'}
+                    </div>
                     <div className="pos-role">Terminal #01</div>
                   </div>
                 </div>
@@ -421,10 +425,10 @@ export default function Dashboard({ onLogout }) {
             <p style={{ fontSize: '11px' }}>Tel: +1-234-567-8900</p>
             <p style={{ fontSize: '10px', marginTop: '4px', fontWeight: '700' }}>PAN: 623989429</p>
           </div>
-          <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '8px 0', marginBottom: '12px' }}>
+            <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '8px 0', marginBottom: '12px' }}>
             <p style={{ fontSize: '11px', marginBottom: '2px' }}>Receipt #: {currentDateTime.receiptNo}</p>
             <p style={{ fontSize: '11px', marginBottom: '2px' }}>Date: {currentDateTime.date} {currentDateTime.time}</p>
-            <p style={{ fontSize: '11px' }}>Cashier: Admin Cashier</p>
+            <p style={{ fontSize: '11px' }}>Cashier: {user ? `${user.firstName} ${user.lastName}` : 'Admin Cashier'}</p>
             {customerName && <p style={{ fontSize: '11px' }}>Customer: {customerName}</p>}
           </div>
           {cart.map(item => (
