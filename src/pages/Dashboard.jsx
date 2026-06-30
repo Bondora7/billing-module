@@ -1,49 +1,194 @@
-import { useState, useRef } from 'react'
-import { Search, ShoppingCart, LogOut, X, Printer, CheckCircle, Wifi, WifiOff } from 'lucide-react'
-
-const MOCK_PRODUCTS = [
-  { id: 1, name: 'Classic Fit Polo Shirt', category: 'Clothing', price: 49.99, sku: 'POLO-001', color: 'Navy Blue' },
-  { id: 2, name: 'Slim Fit Chinos', category: 'Clothing', price: 59.99, sku: 'CHIN-001', color: 'Beige' },
-  { id: 3, name: 'Cotton Crew Neck T-Shirt', category: 'Clothing', price: 24.99, sku: 'TSH-001', color: 'White' },
-  { id: 4, name: 'Wool Blend Sweater', category: 'Clothing', price: 79.99, sku: 'SWT-001', color: 'Gray' },
-  { id: 5, name: 'Denim Jacket', category: 'Clothing', price: 89.99, sku: 'JACK-001', color: 'Indigo' },
-  { id: 6, name: 'Formal Dress Shirt', category: 'Clothing', price: 69.99, sku: 'DRS-001', color: 'Light Blue' },
-  { id: 7, name: 'Casual Shorts', category: 'Clothing', price: 39.99, sku: 'SHRT-001', color: 'Khaki' },
-  { id: 8, name: 'Leather Belt', category: 'Accessories', price: 34.99, sku: 'BELT-001', color: 'Brown' },
-]
-
-const CATEGORIES = ['All', 'Clothing', 'Accessories', 'Shoes', 'Watches']
+import { useState, useRef, useEffect } from 'react'
+import { Search, ShoppingCart, LogOut, X, Printer, CheckCircle, Wifi, WifiOff, Loader2 } from 'lucide-react'
+import api from '../utils/api'
 
 export default function Dashboard({ user, onLogout }) {
+  const [categories, setCategories] = useState([{ _id: 'all', name: 'All' }])
+  const [selectedCategory, setSelectedCategory] = useState('All')
+  const [categoriesLoading, setCategoriesLoading] = useState(true)
+  const [categoriesError, setCategoriesError] = useState('')
+  const [products, setProducts] = useState([])
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [productsError, setProductsError] = useState('')
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 0,
+    hasNextPage: false,
+    total: 0,
+  })
   const [purchases, setPurchases] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+
+  // Handle search input with Enter key
+  const handleSearchChange = (e) => {
+    setSearchInput(e.target.value)
+  }
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault()
+    setSearchTerm(searchInput)
+  }
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [quantity, setQuantity] = useState(1)
   const [cart, setCart] = useState([])
   const [paymentMethod, setPaymentMethod] = useState('')
   const [customerName, setCustomerName] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('All')
   const [printerStatus, setPrinterStatus] = useState('online')
   const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const receiptRef = useRef(null)
+  const productGridRef = useRef(null)
 
-  const filteredProducts = MOCK_PRODUCTS.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
+  // Fetch categories on component mount
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        setCategoriesLoading(true)
+        setCategoriesError('')
+        const response = await api.get('/categories')
+        const categoriesData = response.data
+        
+        // Prepend "All" category to the fetched categories
+        const allCategories = [{ _id: 'all', name: 'All' }, ...categoriesData]
+        setCategories(allCategories)
+      } catch (err) {
+        console.error('Failed to fetch categories:', err)
+        setCategoriesError('Failed to load categories')
+        // Keep default "All" category on error
+        setCategories([{ _id: 'all', name: 'All' }])
+      } finally {
+        setCategoriesLoading(false)
+      }
+    }
+
+    fetchCategories()
+  }, [])
+
+  // Fetch products when search term or category changes
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setProductsLoading(true)
+        setProductsError('')
+        setProducts([])
+        setPagination({
+          currentPage: 1,
+          totalPages: 0,
+          hasNextPage: false,
+          total: 0,
+        })
+
+        const params = {
+          page: 1,
+          limit: 10,
+        }
+
+        // Add productCode only if search term exists
+        if (searchTerm.trim()) {
+          params.productCode = searchTerm.trim()
+        }
+
+        // Add categoryId only if a specific category is selected (not "All")
+        if (selectedCategory !== 'All') {
+          const selectedCat = categories.find(cat => cat.name === selectedCategory)
+          if (selectedCat && selectedCat._id !== 'all') {
+            params.categoryId = selectedCat._id
+          }
+        }
+
+        const response = await api.get('/products/search', { params })
+        const { products: productsData, pagination: paginationData } = response.data
+        
+        setProducts(productsData)
+        setPagination(paginationData)
+      } catch (err) {
+        console.error('Failed to fetch products:', err)
+        setProductsError('Failed to load products')
+        setProducts([])
+      } finally {
+        setProductsLoading(false)
+      }
+    }
+
+    // Debounce search
+    const searchTimeout = setTimeout(() => {
+      fetchProducts()
+    }, searchTerm ? 500 : 0)
+
+    return () => clearTimeout(searchTimeout)
+  }, [searchTerm, selectedCategory, categories])
+
+  // Load more products for infinite scroll
+  const loadMoreProducts = async () => {
+    if (loadingMore || !pagination.hasNextPage) return
+
+    try {
+      setLoadingMore(true)
+      const nextPage = pagination.currentPage + 1
+
+      const params = {
+        page: nextPage,
+        limit: 10,
+      }
+
+      if (searchTerm.trim()) {
+        params.productCode = searchTerm.trim()
+      }
+
+      if (selectedCategory !== 'All') {
+        const selectedCat = categories.find(cat => cat.name === selectedCategory)
+        if (selectedCat && selectedCat._id !== 'all') {
+          params.categoryId = selectedCat._id
+        }
+      }
+
+      const response = await api.get('/products/search', { params })
+      const { products: newProducts, pagination: newPagination } = response.data
+
+      setProducts([...products, ...newProducts])
+      setPagination(newPagination)
+    } catch (err) {
+      console.error('Failed to load more products:', err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // Handle infinite scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!productGridRef.current) return
+
+      const { scrollTop, scrollHeight, clientHeight } = productGridRef.current
+      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight
+
+      if (scrollPercentage > 0.8 && pagination.hasNextPage && !loadingMore && !productsLoading) {
+        loadMoreProducts()
+      }
+    }
+
+    const gridElement = productGridRef.current
+    if (gridElement) {
+      gridElement.addEventListener('scroll', handleScroll)
+      return () => gridElement.removeEventListener('scroll', handleScroll)
+    }
+  }, [pagination.hasNextPage, loadingMore, productsLoading, products])
 
   const addToCart = (product, qty = 1) => {
-    const existing = cart.find(item => item.id === product.id)
+    const existing = cart.find(item => item._id === product._id)
     if (existing) {
       setCart(cart.map(item =>
-        item.id === product.id
+        item._id === product._id
           ? { ...item, quantity: item.quantity + qty }
           : item
       ))
     } else {
-      setCart([...cart, { ...product, quantity: qty }])
+      setCart([...cart, { 
+        ...product, 
+        quantity: qty,
+        id: product._id, // For compatibility with existing cart logic
+      }])
     }
     setSelectedProduct(null)
     setQuantity(1)
@@ -157,59 +302,98 @@ export default function Dashboard({ user, onLogout }) {
 
             {/* Search Bar */}
             <div className="pos-search-bar">
-              <div className="search-bar">
-                <Search size={18} />
-                <input
-                  type="text"
-                  placeholder="Search products by name or SKU..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
+              <form onSubmit={handleSearchSubmit} className="search-form">
+                <div className="search-bar">
+                  <Search size={18} />
+                  <input
+                    type="text"
+                    placeholder="Search products by name or SKU..."
+                    value={searchInput}
+                    onChange={handleSearchChange}
+                  />
+                </div>
+              </form>
             </div>
 
             {/* Category Tabs */}
             <div className="category-tabs">
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat}
-                  className={`category-tab ${selectedCategory === cat ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(cat)}
-                >
-                  {cat}
-                </button>
-              ))}
+              {categoriesLoading ? (
+                <div className="categories-loading">
+                  <Loader2 size={18} className="loading-spinner" />
+                  <span>Loading categories...</span>
+                </div>
+              ) : categoriesError ? (
+                <div className="categories-error">{categoriesError}</div>
+              ) : (
+                categories.map(cat => (
+                  <button
+                    key={cat._id}
+                    className={`category-tab ${selectedCategory === cat.name ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory(cat.name)}
+                  >
+                    {cat.name}
+                  </button>
+                ))
+              )}
             </div>
           </div>
 
           {/* Product Grid */}
-          <div className="product-grid">
-            {filteredProducts.map(product => (
-              <div
-                key={product.id}
-                className="product-card"
-                onClick={() => addToCart(product)}
-              >
-                <div className="product-image">👕</div>
-                <div className="product-info">
-                  <div className="product-name">{product.name}</div>
-                  <div className="product-sku">{product.sku}</div>
-                </div>
-                <div className="product-footer">
-                  <div className="product-price">${product.price.toFixed(2)}</div>
-                  <button className="add-btn" onClick={() => addToCart(product)}>+</button>
-                </div>
+          <div className="product-grid" ref={productGridRef}>
+            {productsLoading && products.length === 0 ? (
+              <div className="products-loading">
+                <Loader2 size={48} className="loading-spinner-large" />
+                <p>Loading products...</p>
               </div>
-            ))}
+            ) : productsError ? (
+              <div className="products-error">
+                <p>{productsError}</p>
+                <button className="btn-retry" onClick={() => window.location.reload()}>Retry</button>
+              </div>
+            ) : products.length === 0 ? (
+              <div className="empty-state">
+                <Search size={48} />
+                <h3>No Products Found</h3>
+                <p>Try adjusting your search or category filter</p>
+              </div>
+            ) : (
+              <>
+                {products.map(product => (
+                  <div
+                    key={product._id}
+                    className="product-card"
+                    onClick={() => addToCart(product)}
+                  >
+                    <div className="product-image">
+                      {product.primaryImage || product.images?.[0] || '👕'}
+                    </div>
+                    <div className="product-info">
+                      <div className="product-name">{product.name}</div>
+                      <div className="product-sku">{product.productCode || product.sku || 'N/A'}</div>
+                      {product.brandName && (
+                        <div className="product-brand">{product.brandName}</div>
+                      )}
+                    </div>
+                    <div className="product-footer">
+                      <div className="product-price">${product.price.toFixed(2)}</div>
+                      <button className="add-btn" onClick={(e) => { e.stopPropagation(); addToCart(product); }}>+</button>
+                    </div>
+                  </div>
+                ))}
+                {loadingMore && (
+                  <div className="loading-more">
+                    <Loader2 size={24} className="loading-spinner" />
+                    <span>Loading more...</span>
+                  </div>
+                )}
+                {!pagination.hasNextPage && products.length > 0 && !loadingMore && (
+                  <div className="no-more-products">
+                    <p>All products loaded</p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-
-          {filteredProducts.length === 0 && (
-            <div className="empty-state">
-              <Search size={48} />
-              <h3>No Products Found</h3>
-              <p>Try adjusting your search or category filter</p>
-            </div>
-          )}
         </div>
 
         {/* Right Side - Cart & Receipt Panel */}
