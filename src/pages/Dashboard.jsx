@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { Search, ShoppingCart, LogOut, X, Printer, CheckCircle, Wifi, WifiOff, Loader2 } from 'lucide-react'
 import api from '../utils/api'
+import ProductImage from '../components/ProductImage'
+import { useDebounce } from '../hooks/useDebounce'
 
-export default function Dashboard({ user, onLogout }) {
+const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
   const [categories, setCategories] = useState([{ _id: 'all', name: 'All' }])
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [categoriesLoading, setCategoriesLoading] = useState(true)
@@ -17,18 +19,10 @@ export default function Dashboard({ user, onLogout }) {
     total: 0,
   })
   const [purchases, setPurchases] = useState([])
-  const [searchTerm, setSearchTerm] = useState('')
   const [searchInput, setSearchInput] = useState('')
 
-  // Handle search input with Enter key
-  const handleSearchChange = (e) => {
-    setSearchInput(e.target.value)
-  }
-
-  const handleSearchSubmit = (e) => {
-    e.preventDefault()
-    setSearchTerm(searchInput)
-  }
+  // Create debounced version of search input (500ms delay)
+  const debouncedSearchTerm = useDebounce(searchInput, 500)
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [quantity, setQuantity] = useState(1)
   const [cart, setCart] = useState([])
@@ -37,41 +31,90 @@ export default function Dashboard({ user, onLogout }) {
   const [printerStatus, setPrinterStatus] = useState('online')
   const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [customerDiscountType, setCustomerDiscountType] = useState('')
+  const [customerDiscountValue, setCustomerDiscountValue] = useState('')
+  const [apiError, setApiError] = useState('')
+  const [purchaseResult, setPurchaseResult] = useState(null)
+  const [alert, setAlert] = useState({ show: false, message: '', type: 'error' })
   const receiptRef = useRef(null)
   const productGridRef = useRef(null)
 
+  // Track previous categories to prevent unnecessary updates
+  const prevCategoriesRef = useRef(categories)
+
+  // Helper function to remove bracket values from category names
+  const cleanCategoryName = (name) => {
+    return name.replace(/\s*\([^)]*\)/g, '').trim()
+  }
+
+  // Reusable function to fetch categories
+  const refreshCategories = async () => {
+    try {
+      setCategoriesLoading(true)
+      setCategoriesError('')
+      const response = await api.get('/categories')
+      const categoriesData = response.data
+
+      // Clean category names by removing bracket values
+      const cleanedCategories = categoriesData.map(cat => ({
+        ...cat,
+        name: cleanCategoryName(cat.name)
+      }))
+
+      // Prepend "All" category to the fetched categories
+      const allCategories = [{ _id: 'all', name: 'All' }, ...cleanedCategories]
+
+      // Only update state if categories actually changed
+      const prevIds = prevCategoriesRef.current.map(c => c._id).join(',')
+      const newIds = allCategories.map(c => c._id).join(',')
+
+      if (prevIds !== newIds) {
+        prevCategoriesRef.current = allCategories
+        setCategories(allCategories)
+      }
+    } catch (err) {
+      console.error('Failed to fetch categories:', err)
+      setCategoriesError('Failed to load categories')
+      // Keep default "All" category on error
+      setCategories([{ _id: 'all', name: 'All' }])
+    } finally {
+      setCategoriesLoading(false)
+    }
+  }
+
+  // Expose refreshCategories function to parent components
+  useImperativeHandle(ref, () => ({
+    refreshCategories
+  }))
+
   // Fetch categories on component mount
   useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        setCategoriesLoading(true)
-        setCategoriesError('')
-        const response = await api.get('/categories')
-        const categoriesData = response.data
-        
-        // Prepend "All" category to the fetched categories
-        const allCategories = [{ _id: 'all', name: 'All' }, ...categoriesData]
-        setCategories(allCategories)
-      } catch (err) {
-        console.error('Failed to fetch categories:', err)
-        setCategoriesError('Failed to load categories')
-        // Keep default "All" category on error
-        setCategories([{ _id: 'all', name: 'All' }])
-      } finally {
-        setCategoriesLoading(false)
-      }
-    }
-
-    fetchCategories()
+    refreshCategories()
   }, [])
 
-  // Fetch products when search term or category changes
+  // Track previous products to prevent unnecessary updates
+  const prevProductsRef = useRef([])
+  const [hasProductsLoaded, setHasProductsLoaded] = useState(false)
+
+  // Fetch products when debounced search term or category changes
   useEffect(() => {
+    // Skip if search term and category haven't changed
+    const prevSearchTerm = prevProductsRef.current.searchTerm || ''
+    const prevCategory = prevProductsRef.current.category || 'All'
+
+    if (prevSearchTerm === debouncedSearchTerm &&
+      prevCategory === selectedCategory &&
+      hasProductsLoaded) {
+      return
+    }
+
     const fetchProducts = async () => {
       try {
+        // Always show loading state during fetch
         setProductsLoading(true)
         setProductsError('')
-        setProducts([])
+
+        // Don't clear existing products until new ones arrive (prevents flickering)
         setPagination({
           currentPage: 1,
           totalPages: 0,
@@ -85,8 +128,8 @@ export default function Dashboard({ user, onLogout }) {
         }
 
         // Add productCode only if search term exists
-        if (searchTerm.trim()) {
-          params.productCode = searchTerm.trim()
+        if (debouncedSearchTerm.trim()) {
+          params.productCode = debouncedSearchTerm.trim()
         }
 
         // Add categoryId only if a specific category is selected (not "All")
@@ -99,25 +142,37 @@ export default function Dashboard({ user, onLogout }) {
 
         const response = await api.get('/products/search', { params })
         const { products: productsData, pagination: paginationData } = response.data
-        
-        setProducts(productsData)
-        setPagination(paginationData)
+
+        // Check if products actually changed before updating state
+        const prevProductIds = prevProductsRef.current.products?.map(p => p._id).join(',') || ''
+        const newProductIds = productsData.map(p => p._id).join(',')
+
+        if (prevProductIds !== newProductIds || !hasProductsLoaded) {
+          setProducts(productsData)
+          setPagination(paginationData)
+          setHasProductsLoaded(true)
+        }
+
+        // Store current search params for next comparison
+        prevProductsRef.current = {
+          searchTerm: debouncedSearchTerm,
+          category: selectedCategory,
+          products: productsData
+        }
       } catch (err) {
         console.error('Failed to fetch products:', err)
         setProductsError('Failed to load products')
-        setProducts([])
+        // Only clear products on error if we've loaded before
+        if (hasProductsLoaded) {
+          setProducts([])
+        }
       } finally {
         setProductsLoading(false)
       }
     }
 
-    // Debounce search
-    const searchTimeout = setTimeout(() => {
-      fetchProducts()
-    }, searchTerm ? 500 : 0)
-
-    return () => clearTimeout(searchTimeout)
-  }, [searchTerm, selectedCategory, categories])
+    fetchProducts()
+  }, [debouncedSearchTerm, selectedCategory, categories, hasProductsLoaded])
 
   // Load more products for infinite scroll
   const loadMoreProducts = async () => {
@@ -132,8 +187,8 @@ export default function Dashboard({ user, onLogout }) {
         limit: 10,
       }
 
-      if (searchTerm.trim()) {
-        params.productCode = searchTerm.trim()
+      if (debouncedSearchTerm.trim()) {
+        params.productCode = debouncedSearchTerm.trim()
       }
 
       if (selectedCategory !== 'All') {
@@ -176,16 +231,34 @@ export default function Dashboard({ user, onLogout }) {
   }, [pagination.hasNextPage, loadingMore, productsLoading, products])
 
   const addToCart = (product, qty = 1) => {
+    const availableStock = getProductStock(product)
+    
+    if (availableStock === 0) {
+      showAlert('No stock available', 'error')
+      return
+    }
+    
     const existing = cart.find(item => item._id === product._id)
     if (existing) {
+      const currentQty = existing.quantity
+      if (currentQty + qty > availableStock) {
+        showAlert(`Only ${availableStock} items available in stock`, 'error')
+        return
+      }
+      
       setCart(cart.map(item =>
         item._id === product._id
           ? { ...item, quantity: item.quantity + qty }
           : item
       ))
     } else {
-      setCart([...cart, { 
-        ...product, 
+      if (qty > availableStock) {
+        showAlert(`Only ${availableStock} items available in stock`, 'error')
+        return
+      }
+      
+      setCart([...cart, {
+        ...product,
         quantity: qty,
         id: product._id, // For compatibility with existing cart logic
       }])
@@ -208,6 +281,19 @@ export default function Dashboard({ user, onLogout }) {
 
   const updateCartQuantity = (id, qty) => {
     if (qty < 1) return
+    
+    const cartItem = cart.find(item => item.id === id)
+    if (cartItem) {
+      const product = products.find(p => p._id === id)
+      const availableStock = product ? getProductStock(product) : 0
+      
+      // Check if trying to increase quantity beyond available stock
+      if (qty > cartItem.quantity && qty > availableStock) {
+        showAlert(`Only ${availableStock} items available in stock`, 'error')
+        return
+      }
+    }
+    
     setCart(cart.map(item =>
       item.id === id ? { ...item, quantity: qty } : item
     ))
@@ -216,7 +302,14 @@ export default function Dashboard({ user, onLogout }) {
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
   const tax = cartTotal * 0.0
-  const finalTotal = cartTotal + tax
+  const discountAmount = customerDiscountType && customerDiscountValue
+    ? (customerDiscountType === 'percentage'
+      ? (cartTotal * parseFloat(customerDiscountValue) / 100)
+      : parseFloat(customerDiscountValue))
+    : 0
+  const totalWithoutDiscount = cartTotal + tax
+  const totalAfterDiscount = Math.max(0, totalWithoutDiscount - discountAmount)
+  const finalTotal = totalAfterDiscount
 
   const getCurrentDateTime = () => {
     const now = new Date()
@@ -229,48 +322,166 @@ export default function Dashboard({ user, onLogout }) {
 
   const currentDateTime = getCurrentDateTime()
 
-  const handlePaymentSelection = (method) => {
-    setPaymentMethod(method)
-    setPaymentSuccess(false)
+  const getProductStock = (product) => {
+    return product.quantity || product.stock || product.stockQuantity || product.availableStock || 0
   }
 
-  const handleCheckout = () => {
+  const handlePaymentSelection = (method) => {
+    // Only allow 'cash' or 'online' payment methods
+    if (method === 'cash' || method === 'online') {
+      setPaymentMethod(method)
+      setPaymentSuccess(false)
+    }
+  }
+
+  const handleCheckout = async () => {
     if (cart.length === 0) return
     if (!paymentMethod) return
-    
+    if (customerDiscountType && !customerDiscountValue) return
+
     setPrinterStatus('printing')
-    setTimeout(() => {
+    setApiError('')
+
+    try {
+      // Prepare purchase data for API
+      const purchaseData = {
+        products: cart.map(item => ({
+          productCode: item.productCode || item.sku || 'N/A',
+          quantity: item.quantity,
+        })),
+        paymentMethod: paymentMethod,
+        customerName: customerName || 'Walk-in Customer',
+        purchasedByName: user ? `${user.firstName} ${user.lastName}` : 'Admin Cashier',
+        notes: '',
+        ...(customerDiscountType && customerDiscountValue && {
+          customerDiscountType: customerDiscountType,
+          customerDiscountValue: parseFloat(customerDiscountValue),
+        }),
+      }
+
+      // Call backend API
+      const response = await api.post('/billing/purchase', purchaseData, {
+        params: {
+          userId: user?._id || '',
+          userRole: user?.role || 'BILLING',
+        },
+      })
+
+      const purchaseResult = response.data
+
+      // Store purchase result for receipt display
+      setPurchaseResult(purchaseResult)
+
+      // Update printer status to online after successful API call
       setPrinterStatus('online')
       setPaymentSuccess(true)
-      alert('Payment Successful! Receipt printed.')
-      window.print()
-    }, 1500)
-    
-    const newPurchase = {
-      id: Date.now(),
-      receiptNo: currentDateTime.receiptNo,
-      customerName: customerName || 'Walk-in Customer',
-      items: cart,
-      subtotal: cartTotal,
-      tax: tax,
-      total: finalTotal,
-      paymentMethod,
-      date: currentDateTime.date,
-      time: currentDateTime.time,
+
+      // Add to purchases history with full details
+      const newPurchase = {
+        id: Date.now(),
+        transactionId: purchaseResult.transactionId,
+        receiptNo: purchaseResult.receiptNo,
+        customerName: purchaseResult.customerName,
+        items: cart,
+        subtotal: purchaseResult.totalAmountWithoutDiscount,
+        discountAmount: purchaseResult.discountAmount || 0,
+        discountType: customerDiscountType,
+        total: purchaseResult.totalAmount,
+        paymentMethod: purchaseResult.paymentMethod,
+        date: currentDateTime.date,
+        time: currentDateTime.time,
+        createdAt: purchaseResult.createdAt,
+      }
+      setPurchases([newPurchase, ...purchases])
+
+      // Show success message with low stock warnings if any
+      if (purchaseResult.lowStockWarnings && purchaseResult.lowStockWarnings.length > 0) {
+        console.warn('Low stock warnings:', purchaseResult.lowStockWarnings)
+      }
+
+      // Refetch products to update stock quantities
+      refetchProducts()
+
+      // Don't clear cart immediately, let user see success
+      setTimeout(() => {
+        setCart([])
+        setCustomerName('')
+        setPaymentMethod('')
+        setCustomerDiscountType('')
+        setCustomerDiscountValue('')
+        setPaymentSuccess(false)
+        setPurchaseResult(null)
+      }, 3000)
+    } catch (err) {
+      console.error('Failed to create purchase:', err)
+      setPrinterStatus('online')
+      setApiError(err.response?.data?.message || 'Failed to process payment. Please try again.')
     }
-    setPurchases([newPurchase, ...purchases])
-    
-    // Don't clear cart immediately, let user see success
+  }
+
+  const printReceipt = () => {
+    window.print()
+  }
+
+  const refetchProducts = async () => {
+    try {
+      setProductsLoading(true)
+      setProductsError('')
+
+      const params = {
+        page: 1,
+        limit: 10,
+      }
+
+      if (debouncedSearchTerm.trim()) {
+        params.productCode = debouncedSearchTerm.trim()
+      }
+
+      if (selectedCategory !== 'All') {
+        const selectedCat = categories.find(cat => cat.name === selectedCategory)
+        if (selectedCat && selectedCat._id !== 'all') {
+          params.categoryId = selectedCat._id
+        }
+      }
+
+      const response = await api.get('/products/search', { params })
+      const { products: productsData, pagination: paginationData } = response.data
+      setProducts(productsData)
+      setPagination(paginationData)
+      setHasProductsLoaded(true)
+
+      prevProductsRef.current = {
+        searchTerm: debouncedSearchTerm,
+        category: selectedCategory,
+        products: productsData
+      }
+    } catch (err) {
+      console.error('Failed to refetch products:', err)
+    } finally {
+      setProductsLoading(false)
+    }
+  }
+
+  const showAlert = (message, type = 'error') => {
+    setAlert({ show: true, message, type })
     setTimeout(() => {
-      setCart([])
-      setCustomerName('')
-      setPaymentMethod('')
-      setPaymentSuccess(false)
-    }, 2000)
+      setAlert({ show: false, message: '', type })
+    }, 3000)
   }
 
   return (
     <div className="dashboard">
+      {/* Custom Alert Toast */}
+      {alert.show && (
+        <div className={`alert-toast alert-${alert.type}`}>
+          <div className="alert-icon">
+            {alert.type === 'error' ? '⚠️' : '✓'}
+          </div>
+          <div className="alert-message">{alert.message}</div>
+          <button className="alert-close" onClick={() => setAlert({ ...alert, show: false })}>×</button>
+        </div>
+      )}
+      
       <div className="pos-container">
         {/* Left Side - Product Selection */}
         <div className="pos-left">
@@ -279,7 +490,7 @@ export default function Dashboard({ user, onLogout }) {
             <div className="pos-header-top">
               <div className="pos-brand">
                 <ShoppingCart size={26} />
-                <h1>Fashion Store POS</h1>
+                <h1>Bondora Billing Module</h1>
               </div>
               <div className="pos-user-info">
                 <div className="pos-cashier">
@@ -290,7 +501,6 @@ export default function Dashboard({ user, onLogout }) {
                     <div className="pos-username">
                       {user ? `${user.firstName} ${user.lastName}` : 'Admin Cashier'}
                     </div>
-                    <div className="pos-role">Terminal #01</div>
                   </div>
                 </div>
                 <button onClick={handleLogout} className="btn-logout">
@@ -302,17 +512,17 @@ export default function Dashboard({ user, onLogout }) {
 
             {/* Search Bar */}
             <div className="pos-search-bar">
-              <form onSubmit={handleSearchSubmit} className="search-form">
+              <div className="search-form">
                 <div className="search-bar">
                   <Search size={18} />
                   <input
                     type="text"
-                    placeholder="Search products by name or SKU..."
+                    placeholder="Search by product code..."
                     value={searchInput}
-                    onChange={handleSearchChange}
+                    onChange={(e) => setSearchInput(e.target.value)}
                   />
                 </div>
-              </form>
+              </div>
             </div>
 
             {/* Category Tabs */}
@@ -350,11 +560,16 @@ export default function Dashboard({ user, onLogout }) {
                 <p>{productsError}</p>
                 <button className="btn-retry" onClick={() => window.location.reload()}>Retry</button>
               </div>
-            ) : products.length === 0 ? (
+            ) : products.length === 0 && hasProductsLoaded ? (
               <div className="empty-state">
                 <Search size={48} />
                 <h3>No Products Found</h3>
                 <p>Try adjusting your search or category filter</p>
+              </div>
+            ) : products.length === 0 && !hasProductsLoaded ? (
+              <div className="products-loading">
+                <Loader2 size={48} className="loading-spinner-large" />
+                <p>Loading products...</p>
               </div>
             ) : (
               <>
@@ -365,7 +580,10 @@ export default function Dashboard({ user, onLogout }) {
                     onClick={() => addToCart(product)}
                   >
                     <div className="product-image">
-                      {product.primaryImage || product.images?.[0] || '👕'}
+                      <ProductImage
+                        src={product.primaryImage || product.images?.[0]}
+                        alt={product.name}
+                      />
                     </div>
                     <div className="product-info">
                       <div className="product-name">{product.name}</div>
@@ -373,10 +591,28 @@ export default function Dashboard({ user, onLogout }) {
                       {product.brandName && (
                         <div className="product-brand">{product.brandName}</div>
                       )}
+                      <div className={`product-stock ${getProductStock(product) === 0 ? 'out-of-stock' : ''}`}>
+                        Stock: {getProductStock(product)}
+                      </div>
                     </div>
                     <div className="product-footer">
-                      <div className="product-price">${product.price.toFixed(2)}</div>
-                      <button className="add-btn" onClick={(e) => { e.stopPropagation(); addToCart(product); }}>+</button>
+                      <div className="product-price">Rs. {product.price.toFixed(2)}</div>
+                      <button 
+                        className="add-btn" 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          const stock = getProductStock(product)
+                          if (stock === 0) {
+                            showAlert('No stock available', 'error')
+                          } else {
+                            addToCart(product);
+                          }
+                        }}
+                        disabled={getProductStock(product) === 0}
+                        style={getProductStock(product) === 0 ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -419,52 +655,56 @@ export default function Dashboard({ user, onLogout }) {
             </div>
           ) : (
             <>
-              {/* Cart Items - Show Latest Item */}
+              {/* Cart Items - Scrollable List */}
               <div className="cart-items">
-                {cart.length > 0 && (
-                  <div className="cart-item cart-item-single">
-                    <div style={{ 
-                      fontSize: '11px', 
-                      fontWeight: 700, 
-                      color: 'var(--text-light)', 
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                      marginBottom: '8px'
-                    }}>
-                      Latest Item ({cart.length} total)
-                    </div>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: 'var(--text-light)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  marginBottom: '8px',
+                  padding: '0 4px'
+                }}>
+                  Cart Items ({cart.length} total)
+                </div>
+                {cart.map((item, index) => (
+                  <div key={item.id} className="cart-item">
                     <div className="cart-item-header">
-                      <div className="cart-item-name">{cart[cart.length - 1].name}</div>
+                      <div className="cart-item-name">{item.name}</div>
                       <div className="cart-item-price">
-                        ${(cart[cart.length - 1].price * cart[cart.length - 1].quantity).toFixed(2)}
+                        Rs. {(item.price * item.quantity).toFixed(2)}
                       </div>
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-light)', marginBottom: '6px' }}>
+                      Rs. {item.price.toFixed(2)} each
                     </div>
                     <div className="cart-item-footer">
                       <div className="cart-item-actions">
-                        <button 
-                          className="qty-btn" 
-                          onClick={() => updateCartQuantity(cart[cart.length - 1].id, cart[cart.length - 1].quantity - 1)}
+                        <button
+                          className="qty-btn"
+                          onClick={() => updateCartQuantity(item.id, item.quantity - 1)}
                         >
                           −
                         </button>
-                        <span className="qty-display">{cart[cart.length - 1].quantity}</span>
-                        <button 
-                          className="qty-btn" 
-                          onClick={() => updateCartQuantity(cart[cart.length - 1].id, cart[cart.length - 1].quantity + 1)}
+                        <span className="qty-display">{item.quantity}</span>
+                        <button
+                          className="qty-btn"
+                          onClick={() => updateCartQuantity(item.id, item.quantity + 1)}
                         >
                           +
                         </button>
                       </div>
-                      <button 
-                        className="btn-remove" 
-                        onClick={() => removeFromCart(cart[cart.length - 1].id)}
+                      <button
+                        className="btn-remove"
+                        onClick={() => removeFromCart(item.id)}
                         title="Remove item"
                       >
                         <X size={18} />
                       </button>
                     </div>
                   </div>
-                )}
+                ))}
               </div>
 
               {/* Payment & Checkout Section */}
@@ -509,12 +749,52 @@ export default function Dashboard({ user, onLogout }) {
                         💵 Cash
                       </div>
                       <div
-                        className={`payment-option ${paymentMethod === 'card' ? 'active' : ''}`}
-                        onClick={() => handlePaymentSelection('card')}
+                        className={`payment-option ${paymentMethod === 'online' ? 'active' : ''}`}
+                        onClick={() => handlePaymentSelection('online')}
                       >
-                        💳 Card
+                        💳 Online
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Customer Discount */}
+                {!paymentSuccess && paymentMethod && (
+                  <div className="discount-section">
+                    <label>Customer Discount (Optional)</label>
+                    <div className="discount-type-options">
+                      <div
+                        className={`discount-type-option ${customerDiscountType === 'flat' ? 'active' : ''}`}
+                        onClick={() => setCustomerDiscountType(customerDiscountType === 'flat' ? '' : 'flat')}
+                      >
+                        Flat (Rs.)
+                      </div>
+                      <div
+                        className={`discount-type-option ${customerDiscountType === 'percentage' ? 'active' : ''}`}
+                        onClick={() => setCustomerDiscountType(customerDiscountType === 'percentage' ? '' : 'percentage')}
+                      >
+                        Percentage (%)
+                      </div>
+                    </div>
+                    {customerDiscountType && (
+                      <input
+                        type="number"
+                        className="discount-input"
+                        placeholder={customerDiscountType === 'flat' ? 'Enter discount amount (Rs.)' : 'Enter discount percentage (%)'}
+                        value={customerDiscountValue}
+                        onChange={(e) => setCustomerDiscountValue(e.target.value)}
+                        min="0"
+                        max={customerDiscountType === 'percentage' ? '100' : undefined}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* API Error Message */}
+                {apiError && (
+                  <div className="api-error">
+                    <p>{apiError}</p>
+                    <button onClick={() => setApiError('')}>Dismiss</button>
                   </div>
                 )}
 
@@ -524,69 +804,102 @@ export default function Dashboard({ user, onLogout }) {
                     <CheckCircle size={48} color="#10b981" />
                     <h3>Payment Successful!</h3>
                     <p>Receipt printed</p>
+                    <button className="btn-print-receipt" onClick={printReceipt}>
+                      <Printer size={18} />
+                      Print Receipt
+                    </button>
                   </div>
                 )}
 
-                {/* Receipt Preview - Compact */}
-                {paymentMethod && (
-                  <div className="receipt-preview">
-                    <div className="receipt-header">
-                      <h3>FASHION STORE</h3>
-                      <div className="receipt-date">
-                        {currentDateTime.date} {currentDateTime.time}
+                {/* Receipt Preview - Show when items in cart */}
+                {cart.length > 0 && (
+                  <div className="receipt-preview thermal-preview">
+                    <div className="bill-center">
+                      <div className="shop-name">Bondora</div>
+                      <div>Bode Planning</div>
+                      <div>Tel: 9713840508</div>
+                      <br />
+                      <strong>ESTIMATION</strong>
+                      <div>(This is not a Tax Invoice.)</div>
+                    </div>
+                    <br />
+                    <div>Date: {currentDateTime.date}</div>
+                    <div>Area: Bode Planning</div>
+                    <hr />
+                    <div className="bill-heading">
+                      <span>Item</span>
+                      <span>Qty</span>
+                      <span>Rate</span>
+                      <span>Amt</span>
+                    </div>
+                    <hr />
+                    {cart.map(item => (
+                      <div key={item.id} className="bill-row">
+                        <span>{item.name}</span>
+                        <span>{item.quantity}</span>
+                        <span>{item.price.toFixed(0)}</span>
+                        <span>{(item.price * item.quantity).toFixed(0)}</span>
                       </div>
-                      <div style={{ fontSize: '9px', fontWeight: 700, marginTop: '4px' }}>
-                        PAN: 623989429
+                    ))}
+                    <hr />
+                    <div className="bill-total">
+                      <span>Total Items ({cartCount})</span>
+                      <span>Rs. {cartTotal.toFixed(2)}</span>
+                    </div>
+                    <div className="bill-total">
+                      <span>Sub Total</span>
+                      <span>Rs. {cartTotal.toFixed(2)}</span>
+                    </div>
+                    {customerDiscountType && customerDiscountValue && (
+                      <>
+                        <div className="bill-total">
+                          <span>Total (Before Discount)</span>
+                          <span>Rs. {totalWithoutDiscount.toFixed(2)}</span>
+                        </div>
+                        <div className="bill-total">
+                          <span>Discount ({customerDiscountType === 'percentage' ? `${customerDiscountValue}%` : 'Flat'})</span>
+                          <span>-Rs. {discountAmount.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="bill-total">
+                      <strong>Total {customerDiscountType && customerDiscountValue ? '(After Discount)' : ''}</strong>
+                      <strong>Rs. {finalTotal.toFixed(2)}</strong>
+                    </div>
+                    <div className="bill-total">
+                      <span>Remaining Total</span>
+                      <span>Rs. {finalTotal.toFixed(2)}</span>
+                    </div>
+                    <hr />
+                    <div className="bill-total">
+                      <span>Due Amount</span>
+                      <span>Rs. 0.00</span>
+                    </div>
+                    <br />
+                    <div>Counter: Bode Planning </div>
+                    <div>Cashier: {user ? `${user.firstName} ${user.lastName}` : "Cashier"}</div>
+                    <br />
+                    <div className="bill-center">
+                      <strong>*** Not a Tax Invoice ***</strong>
+                      <div>This is for official estimation only.</div>
+                      <div>Please present this memo at the counter</div>
+                      <div>to receive your Official Tax Invoice.</div>
+                      <br />
+                      <div>Thanks for visiting us.</div>
+                    </div>
+                    {paymentMethod && !paymentSuccess && (
+                      <div style={{ textAlign: 'center', marginTop: '10px', padding: '8px', background: '#fef3c7', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                        Preview - Select payment method to proceed
                       </div>
-                    </div>
-                    <div className="receipt-items">
-                      {cart.slice(-3).map(item => ( // Show last 3 items
-                        <div key={item.id} className="receipt-item">
-                          <span>{item.name.substring(0, 20)} x{item.quantity}</span>
-                          <span>${(item.price * item.quantity).toFixed(2)}</span>
-                        </div>
-                      ))}
-                      {cart.length > 3 && (
-                        <div style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text-light)', padding: '4px' }}>
-                          +{cart.length - 3} more items
-                        </div>
-                      )}
-                    </div>
-                    <div className="receipt-divider"></div>
-                    <div className="receipt-total">
-                      <span>TOTAL</span>
-                      <span>${finalTotal.toFixed(2)}</span>
-                    </div>
-                    <div className="receipt-total">
-                      <span>{paymentMethod === 'cash' ? '💵 CASH' : '💳 CARD'}</span>
-                      <span style={{ color: '#10b981', fontWeight: 700 }}>PAID</span>
-                    </div>
-                    <div className="receipt-footer">
-                      ✓ Receipt Ready
-                    </div>
+                    )}
                   </div>
                 )}
 
-                {/* Totals */}
-                <div className="totals-section">
-                  <div className="total-row">
-                    <span>Subtotal ({cartCount} items)</span>
-                    <span className="total-amount">${cartTotal.toFixed(2)}</span>
-                  </div>
-                  <div className="total-row">
-                    <span>Tax (0%)</span>
-                    <span className="total-amount">$0.00</span>
-                  </div>
-                  <div className="total-row final">
-                    <span>Total Amount</span>
-                    <span className="total-amount">${finalTotal.toFixed(2)}</span>
-                  </div>
-                </div>
 
                 {/* Checkout Button */}
                 {!paymentSuccess && (
-                  <button 
-                    onClick={handleCheckout} 
+                  <button
+                    onClick={handleCheckout}
                     className="btn-checkout"
                     disabled={cart.length === 0 || !paymentMethod}
                   >
@@ -601,52 +914,134 @@ export default function Dashboard({ user, onLogout }) {
       </div>
 
       {/* Receipt for Printing - Hidden from UI, visible only when printing */}
-      <div ref={receiptRef} id="print-receipt" style={{ display: 'none' }}>
-        <div style={{ width: '320px', padding: '24px', fontFamily: 'Courier New, monospace', background: 'white' }}>
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <h2 style={{ marginBottom: '8px' }}>FASHION STORE</h2>
-            <p style={{ fontSize: '11px', marginBottom: '4px' }}>123 Fashion Street, Mall Road</p>
-            <p style={{ fontSize: '11px' }}>Tel: +1-234-567-8900</p>
-            <p style={{ fontSize: '10px', marginTop: '4px', fontWeight: '700' }}>PAN: 623989429</p>
+      <div
+        ref={receiptRef}
+        id="print-receipt"
+        style={{
+          width: "58mm",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          padding: "5px",
+          background: "#fff",
+          color: "#000",
+        }}
+      >
+        <div style={{ textAlign: "left" }}>
+          <div style={{ textAlign: "center" }}>
+            <div>Bondora</div>
+            <div>Bode Planning</div>
+            <div>Tel: 9713840508</div>
+
+            <br />
+
+            <div style={{ fontWeight: "bold" }}>ESTIMATION</div>
+            <div>(This is not a Tax Invoice.)</div>
+
+            <br />
           </div>
-            <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '8px 0', marginBottom: '12px' }}>
-            <p style={{ fontSize: '11px', marginBottom: '2px' }}>Receipt #: {currentDateTime.receiptNo}</p>
-            <p style={{ fontSize: '11px', marginBottom: '2px' }}>Date: {currentDateTime.date} {currentDateTime.time}</p>
-            <p style={{ fontSize: '11px' }}>Cashier: {user ? `${user.firstName} ${user.lastName}` : 'Admin Cashier'}</p>
-            {customerName && <p style={{ fontSize: '11px' }}>Customer: {customerName}</p>}
+
+          <div>
+            Date: {currentDateTime.date}
+            <br />
+            Area: Bode Planning
+            <br />
+            Receipt No: {purchaseResult?.receiptNo}
           </div>
-          {cart.map(item => (
-            <div key={item.id} style={{ marginBottom: '6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                <span>{item.name}</span>
+
+          <hr />
+
+          <table style={{ width: "100%", fontSize: "12px" }}>
+            <thead>
+              <tr>
+                <th align="left">Item</th>
+                <th align="center">QTY</th>
+                <th align="right">Rate</th>
+                <th align="right">Amount</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {cart.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.name}</td>
+                  <td align="center">{item.quantity}</td>
+                  <td align="right">{item.price}</td>
+                  <td align="right">
+                    {(item.price * item.quantity).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <hr />
+
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+            <span>Total Items ({cartCount}) :</span>
+            <span>Rs. {cartTotal.toFixed(2)}</span>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+            <span>Sub Total :</span>
+            <span>Rs. {cartTotal.toFixed(2)}</span>
+          </div>
+
+          {customerDiscountType && customerDiscountValue && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+                <span>Total (Before Discount) :</span>
+                <span>Rs. {totalWithoutDiscount.toFixed(2)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', paddingLeft: '8px' }}>
-                <span>{item.quantity} x ${item.price.toFixed(2)}</span>
-                <span>${(item.price * item.quantity).toFixed(2)}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+                <span>Discount ({customerDiscountType === 'percentage' ? `${customerDiscountValue}%` : 'Flat'}) :</span>
+                <span>-Rs. {discountAmount.toFixed(2)}</span>
               </div>
-            </div>
-          ))}
-          <div style={{ borderTop: '1px dashed #000', marginTop: '10px', paddingTop: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-              <span>Subtotal:</span>
-              <span>${cartTotal.toFixed(2)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-              <span>Tax (0%):</span>
-              <span>$0.00</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 'bold', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #000' }}>
-              <span>TOTAL:</span>
-              <span>${finalTotal.toFixed(2)}</span>
-            </div>
+            </>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+            <strong>Total {customerDiscountType && customerDiscountValue ? '(After Discount)' : ''} :</strong>
+            <strong>Rs. {finalTotal.toFixed(2)}</strong>
           </div>
-          <div style={{ textAlign: 'center', marginTop: '16px', paddingTop: '12px', borderTop: '1px dashed #000' }}>
-            <p style={{ fontSize: '11px', marginBottom: '4px' }}>Payment: {paymentMethod === 'cash' ? 'Cash' : 'Card'}</p>
-            <p style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '8px' }}>Thank You!</p>
-            <p style={{ fontSize: '10px', marginTop: '4px' }}>Please visit again!</p>
+
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+            <span>Remaining Total :</span>
+            <span>Rs. {finalTotal.toFixed(2)}</span>
+          </div>
+
+          <hr />
+
+          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
+            <span>Due Amount :</span>
+            <span>Rs. 0.00</span>
+          </div>
+
+          <br />
+
+          <div style={{ textAlign: "left" }}>
+            Counter: Bode Planning
+            <br />
+            Cashier: {user ? `${user.firstName} ${user.lastName}` : "Cashier"}
+          </div>
+
+          <br />
+
+          <div style={{ textAlign: "center" }}>
+            *** Not a Tax Invoice ***
+            <br />
+            This is for official estimation only.
+            <br />
+            Please present this memo at the counter
+            <br />
+            to receive your Official Tax Invoice.
+            <br />
+            <br />
+            Thanks for visiting us.
           </div>
         </div>
       </div>
     </div>
   )
-}
+})
+
+export default Dashboard

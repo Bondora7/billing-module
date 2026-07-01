@@ -37,7 +37,7 @@ export default function Login({ onLogin }) {
           <div className="mall-icon">
             <ShoppingBag size={48} />
           </div>
-          <h1>Mall Billing System</h1>
+          <h1>Bondora Billing System</h1>
           <p>Point of Sale Terminal - Sign in to continue</p>
         </div>
         <form onSubmit={handleSubmit} className="login-form">
