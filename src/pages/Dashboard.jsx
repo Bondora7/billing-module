@@ -817,7 +817,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
                   <div className="receipt-preview thermal-preview">
                     <div className="bill-center">
                       <div className="shop-name">Bondora</div>
-                      <div>Bode Planning</div>
+                      <div>Nikosera, Bhaktapur</div>
                       <div>Tel: 9713840508</div>
                       <br />
                       <strong>ESTIMATION</strong>
@@ -825,7 +825,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
                     </div>
                     <br />
                     <div>Date: {currentDateTime.date}</div>
-                    <div>Area: Bode Planning</div>
+                    <div>Area: Nikosera, Bhaktapur</div>
                     <hr />
                     <div className="bill-heading">
                       <span>Item</span>
@@ -882,11 +882,9 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
                     <br />
                     <div className="bill-center">
                       <strong>*** Not a Tax Invoice ***</strong>
-                      <div>This is for official estimation only.</div>
-                      <div>Please present this memo at the counter</div>
-                      <div>to receive your Official Tax Invoice.</div>
+                      <div>Products once sold can only be exchanged.</div>
                       <br />
-                      <div>Thanks for visiting us.</div>
+                      <div>Thank you for visiting us.</div>
                     </div>
                     {paymentMethod && !paymentSuccess && (
                       <div style={{ textAlign: 'center', marginTop: '10px', padding: '8px', background: '#fef3c7', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
@@ -914,18 +912,18 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
         </div>
       </div>
 
-      {/* Receipt for Printing - Thermal Printer (58mm) */}
+      {/* Receipt for Printing - Thermal Printer (80mm for POS-80) */}
       <div
         ref={receiptRef}
         id="print-receipt"
         style={{
-          width: "58mm",
+          width: "80mm",
           fontFamily: "'Courier New', monospace",
-          fontSize: "10px",
-          padding: "2mm 3mm",
+          fontSize: "11px",
+          padding: "2mm 4mm",
           background: "#fff",
           color: "#000",
-          lineHeight: "1.25",
+          lineHeight: "1.3",
           wordWrap: "break-word",
           overflowWrap: "break-word",
           whiteSpace: "normal",
@@ -933,7 +931,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
       >
         <div style={{ textAlign: "center", marginBottom: "4px" }}>
           <div style={{ fontSize: "14px", fontWeight: "bold" }}>Bondora</div>
-          <div>Bode Planning</div>
+          <div>Nikosera, Bhaktapur</div>
           <div>Tel: 9713840508</div>
           <div style={{ fontWeight: "bold", marginTop: "4px" }}>ESTIMATION</div>
           <div style={{ fontSize: "9px" }}>(This is not a Tax Invoice.)</div>
@@ -941,7 +939,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
 
         <div style={{ marginBottom: "4px" }}>
           <div>Date: {currentDateTime.date}</div>
-          <div>Area: Bode Planning</div>
+          <div>Area: Nikosera, Bhaktapur</div>
           <div>Receipt No: {purchaseResult?.receiptNo}</div>
         </div>
 
@@ -1020,14 +1018,9 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
         <div style={{ textAlign: "center", marginTop: "4px", fontSize: "9px" }}>
           *** Not a Tax Invoice ***
           <br />
-          This is for official estimation only.
+          Products once sold can only be exchanged.
           <br />
-          Please present this memo at the counter
-          <br />
-          to receive your Official Tax Invoice.
-          <br />
-          <br />
-          Thanks for visiting us.
+          Thank you for visiting us.
         </div>
       </div>
     </div>
