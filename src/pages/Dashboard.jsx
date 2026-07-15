@@ -420,6 +420,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
   }
 
   const printReceipt = () => {
+    // Focus the print content and trigger print
     window.print()
   }
 
@@ -863,7 +864,7 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
                       </>
                     )}
                     <div className="bill-total">
-                      <strong>Total {customerDiscountType && customerDiscountValue ? '(After Discount)' : ''}</strong>
+                      <strong>Total {customerDiscountType && customerDiscountValue ? '(With Discount)' : ''}</strong>
                       <strong>Rs. {finalTotal.toFixed(2)}</strong>
                     </div>
                     <div className="bill-total">
@@ -913,131 +914,120 @@ const Dashboard = forwardRef(function Dashboard({ user, onLogout }, ref) {
         </div>
       </div>
 
-      {/* Receipt for Printing - Hidden from UI, visible only when printing */}
+      {/* Receipt for Printing - Thermal Printer (58mm) */}
       <div
         ref={receiptRef}
         id="print-receipt"
         style={{
           width: "58mm",
-          fontFamily: "monospace",
-          fontSize: "12px",
-          padding: "5px",
+          fontFamily: "'Courier New', monospace",
+          fontSize: "10px",
+          padding: "2mm 3mm",
           background: "#fff",
           color: "#000",
+          lineHeight: "1.25",
+          wordWrap: "break-word",
+          overflowWrap: "break-word",
+          whiteSpace: "normal",
         }}
       >
-        <div style={{ textAlign: "left" }}>
-          <div style={{ textAlign: "center" }}>
-            <div>Bondora</div>
-            <div>Bode Planning</div>
-            <div>Tel: 9713840508</div>
+        <div style={{ textAlign: "center", marginBottom: "4px" }}>
+          <div style={{ fontSize: "14px", fontWeight: "bold" }}>Bondora</div>
+          <div>Bode Planning</div>
+          <div>Tel: 9713840508</div>
+          <div style={{ fontWeight: "bold", marginTop: "4px" }}>ESTIMATION</div>
+          <div style={{ fontSize: "9px" }}>(This is not a Tax Invoice.)</div>
+        </div>
 
-            <br />
+        <div style={{ marginBottom: "4px" }}>
+          <div>Date: {currentDateTime.date}</div>
+          <div>Area: Bode Planning</div>
+          <div>Receipt No: {purchaseResult?.receiptNo}</div>
+        </div>
 
-            <div style={{ fontWeight: "bold" }}>ESTIMATION</div>
-            <div>(This is not a Tax Invoice.)</div>
+        <hr style={{ border: "none", borderTop: "1px dashed #000", margin: "3px 0" }} />
 
-            <br />
-          </div>
-
-          <div>
-            Date: {currentDateTime.date}
-            <br />
-            Area: Bode Planning
-            <br />
-            Receipt No: {purchaseResult?.receiptNo}
-          </div>
-
-          <hr />
-
-          <table style={{ width: "100%", fontSize: "12px" }}>
-            <thead>
-              <tr>
-                <th align="left">Item</th>
-                <th align="center">QTY</th>
-                <th align="right">Rate</th>
-                <th align="right">Amount</th>
+        <table style={{ width: "100%", fontSize: "10px", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th align="left" style={{ width: "45%", padding: "1px 0" }}>Item</th>
+              <th align="center" style={{ width: "15%", padding: "1px 0" }}>QTY</th>
+              <th align="right" style={{ width: "20%", padding: "1px 0" }}>Rate</th>
+              <th align="right" style={{ width: "20%", padding: "1px 0" }}>Amt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cart.map((item) => (
+              <tr key={item.id}>
+                <td align="left" style={{ wordBreak: "break-word", padding: "1px 0" }}>{item.name}</td>
+                <td align="center" style={{ padding: "1px 0" }}>{item.quantity}</td>
+                <td align="right" style={{ padding: "1px 0" }}>{item.price.toFixed(0)}</td>
+                <td align="right" style={{ padding: "1px 0" }}>
+                  {(item.price * item.quantity).toFixed(0)}
+                </td>
               </tr>
-            </thead>
+            ))}
+          </tbody>
+        </table>
 
-            <tbody>
-              {cart.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td align="center">{item.quantity}</td>
-                  <td align="right">{item.price}</td>
-                  <td align="right">
-                    {(item.price * item.quantity).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <hr style={{ border: "none", borderTop: "1px dashed #000", margin: "3px 0" }} />
 
-          <hr />
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+          <span>Total Items ({cartCount}) :</span>
+          <span>Rs.{cartTotal.toFixed(2)}</span>
+        </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-            <span>Total Items ({cartCount}) :</span>
-            <span>Rs. {cartTotal.toFixed(2)}</span>
-          </div>
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+          <span>Sub Total :</span>
+          <span>Rs.{cartTotal.toFixed(2)}</span>
+        </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-            <span>Sub Total :</span>
-            <span>Rs. {cartTotal.toFixed(2)}</span>
-          </div>
+        {customerDiscountType && customerDiscountValue && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+              <span>Before Discount :</span>
+              <span>Rs.{totalWithoutDiscount.toFixed(2)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+              <span>Discount{customerDiscountType === 'percentage' ? `(${customerDiscountValue}%)` : ''} :</span>
+              <span>-Rs.{discountAmount.toFixed(2)}</span>
+            </div>
+          </>
+        )}
 
-          {customerDiscountType && customerDiscountValue && (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-                <span>Total (Before Discount) :</span>
-                <span>Rs. {totalWithoutDiscount.toFixed(2)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-                <span>Discount ({customerDiscountType === 'percentage' ? `${customerDiscountValue}%` : 'Flat'}) :</span>
-                <span>-Rs. {discountAmount.toFixed(2)}</span>
-              </div>
-            </>
-          )}
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0", fontWeight: "bold" }}>
+          <span>Total{customerDiscountType && customerDiscountValue ? '(With Disc.)' : ''} :</span>
+          <span>Rs.{finalTotal.toFixed(2)}</span>
+        </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-            <strong>Total {customerDiscountType && customerDiscountValue ? '(After Discount)' : ''} :</strong>
-            <strong>Rs. {finalTotal.toFixed(2)}</strong>
-          </div>
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+          <span>Remaining Total :</span>
+          <span>Rs.{finalTotal.toFixed(2)}</span>
+        </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-            <span>Remaining Total :</span>
-            <span>Rs. {finalTotal.toFixed(2)}</span>
-          </div>
+        <hr style={{ border: "none", borderTop: "1px dashed #000", margin: "3px 0" }} />
 
-          <hr />
+        <div style={{ display: "flex", justifyContent: "space-between", margin: "1px 0" }}>
+          <span>Due Amount :</span>
+          <span>Rs.0.00</span>
+        </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", margin: "3px 0" }}>
-            <span>Due Amount :</span>
-            <span>Rs. 0.00</span>
-          </div>
+        <div style={{ marginTop: "4px" }}>
+          <div>Counter: Bode Planning</div>
+          <div>Cashier: {user ? `${user.firstName} ${user.lastName}` : "Cashier"}</div>
+        </div>
 
+        <div style={{ textAlign: "center", marginTop: "4px", fontSize: "9px" }}>
+          *** Not a Tax Invoice ***
           <br />
-
-          <div style={{ textAlign: "left" }}>
-            Counter: Bode Planning
-            <br />
-            Cashier: {user ? `${user.firstName} ${user.lastName}` : "Cashier"}
-          </div>
-
+          This is for official estimation only.
           <br />
-
-          <div style={{ textAlign: "center" }}>
-            *** Not a Tax Invoice ***
-            <br />
-            This is for official estimation only.
-            <br />
-            Please present this memo at the counter
-            <br />
-            to receive your Official Tax Invoice.
-            <br />
-            <br />
-            Thanks for visiting us.
-          </div>
+          Please present this memo at the counter
+          <br />
+          to receive your Official Tax Invoice.
+          <br />
+          <br />
+          Thanks for visiting us.
         </div>
       </div>
     </div>
