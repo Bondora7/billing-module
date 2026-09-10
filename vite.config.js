@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       port: parseInt(env.VITE_PORT, 10) || 5173,
-       allowedHosts: ['bondora-billing-production.up.railway.app'],
+       allowedHosts: ['billing-module-production.up.railway.app'],
     },
   }
 })
